@@ -1,22 +1,183 @@
 <!DOCTYPE html>
-<html>
+<html lang="pl">
 <head>
-  <meta charset="UTF-8">
-  <script src="https://aframe.io/releases/1.4.1/aframe.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>AR Model Viewer</title>
+
+  <!-- MindAR + Three.js -->
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"></script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+
+    #container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Ekran startowy */
+    #start-screen {
+      position: absolute;
+      inset: 0;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #0d0d0d, #1a1a2e);
+      color: #fff;
+      text-align: center;
+      padding: 2rem;
+    }
+
+    #start-screen h1 {
+      font-family: sans-serif;
+      font-size: 1.8rem;
+      margin-bottom: 1rem;
+      color: #00e5ff;
+    }
+
+    #start-screen p {
+      font-family: sans-serif;
+      font-size: 1rem;
+      color: #ccc;
+      margin-bottom: 2rem;
+      max-width: 320px;
+      line-height: 1.6;
+    }
+
+    #start-btn {
+      padding: 0.9rem 2.4rem;
+      font-size: 1.1rem;
+      font-family: sans-serif;
+      background: #00e5ff;
+      color: #000;
+      border: none;
+      border-radius: 50px;
+      cursor: pointer;
+      font-weight: bold;
+      box-shadow: 0 0 20px #00e5ff88;
+      transition: transform 0.1s;
+    }
+
+    #start-btn:active { transform: scale(0.96); }
+
+    /* Podpowiedź podczas skanowania */
+    #hint {
+      position: absolute;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 5;
+      background: rgba(0,0,0,0.6);
+      color: #fff;
+      font-family: sans-serif;
+      font-size: 0.95rem;
+      padding: 0.6rem 1.4rem;
+      border-radius: 30px;
+      pointer-events: none;
+      display: none;
+    }
+  </style>
 </head>
-
 <body>
+  <div id="container">
 
-<a-scene mindar-image="imageTargetSrc: targets.mind;" embedded>
-  
-  <a-camera></a-camera>
+    <!-- Ekran startowy -->
+    <div id="start-screen">
+      <h1>🔍 AR Model Viewer</h1>
+      <p>Naciśnij przycisk, a następnie skieruj aparat na marker, aby zobaczyć model 3D.</p>
+      <button id="start-btn">Uruchom AR</button>
+    </div>
 
-  <a-entity mindar-image-target="targetIndex: 0">
-    <a-box color="red"></a-box>
-  </a-entity>
+    <!-- Podpowiedź -->
+    <div id="hint">📷 Skieruj aparat na marker...</div>
 
-</a-scene>
+  </div>
 
+  <script>
+    const startBtn = document.getElementById('start-btn');
+    const startScreen = document.getElementById('start-screen');
+    const hint = document.getElementById('hint');
+
+    startBtn.addEventListener('click', () => {
+      startScreen.style.display = 'none';
+      hint.style.display = 'block';
+      startAR();
+    });
+
+    async function startAR() {
+      const mindarThree = new window.MINDAR.IMAGE.MindARThree({
+        container: document.getElementById('container'),
+        imageTargetSrc: 'targets.mind',
+        // Możesz odkomentować poniższe opcje jeśli potrzebujesz:
+        // maxTrack: 1,
+        // filterMinCF: 0.001,
+        // filterBeta: 0.001,
+        // warmupTolerance: 5,
+        // missTolerance: 5,
+      });
+
+      const { renderer, scene, camera } = mindarThree;
+
+      // Oświetlenie
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+      scene.add(ambientLight);
+
+      const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+      dirLight.position.set(2, 5, 3);
+      scene.add(dirLight);
+
+      // Zakotwiczenie na marker #0
+      const anchor = mindarThree.addAnchor(0);
+
+      // Ładowanie modelu GLB
+      const loader = new THREE.GLTFLoader();
+      loader.load(
+        'model.glb',
+        (gltf) => {
+          const model = gltf.scene;
+
+          // Wyśrodkuj i przeskaluj model automatycznie
+          const box = new THREE.Box3().setFromObject(model);
+          const size = box.getSize(new THREE.Vector3());
+          const center = box.getCenter(new THREE.Vector3());
+
+          const maxDim = Math.max(size.x, size.y, size.z);
+          const scale = 0.8 / maxDim; // dopasuj do markera (0.8 jednostki)
+
+          model.scale.setScalar(scale);
+          model.position.sub(center.multiplyScalar(scale));
+
+          anchor.group.add(model);
+        },
+        undefined,
+        (err) => {
+          console.error('Błąd ładowania modelu:', err);
+        }
+      );
+
+      // Zdarzenia: marker znaleziony / zgubiony
+      anchor.onTargetFound = () => {
+        hint.textContent = '✅ Marker znaleziony!';
+        setTimeout(() => { hint.style.display = 'none'; }, 2000);
+      };
+
+      anchor.onTargetLost = () => {
+        hint.textContent = '📷 Skieruj aparat na marker...';
+        hint.style.display = 'block';
+      };
+
+      // Start
+      await mindarThree.start();
+
+      renderer.setAnimationLoop(() => {
+        renderer.render(scene, camera);
+      });
+    }
+  </script>
 </body>
 </html>
